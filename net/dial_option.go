@@ -206,6 +206,15 @@ func WithTLSConfigAndPriority(priority uint64, tlsConfig *tls.Config) DialOption
 	})
 }
 
+// WithDialer replaces only raw connection establishment. The function receives
+// the proxy address when a proxy is configured, otherwise the destination.
+// Proxy negotiation and all after hooks still run normally. It must honor ctx.
+func WithDialer(dialer func(context.Context, string) (net.Conn, error)) DialOption {
+	return newFuncDialOption(func(do *dialOptions) {
+		do.dialer = dialer
+	})
+}
+
 func WithProtocol(protocol string) DialOption {
 	return newFuncDialOption(func(do *dialOptions) {
 		do.protocol = protocol
@@ -218,6 +227,8 @@ func WithLocalAddr(laddr string) DialOption {
 	})
 }
 
+// WithTimeout bounds raw dialing and the complete after-hook phase (including
+// proxy handshakes). A non-positive timeout adds no deadline.
 func WithTimeout(timeout time.Duration) DialOption {
 	return newFuncDialOption(func(do *dialOptions) {
 		do.timeout = timeout

@@ -35,6 +35,12 @@ func DialContext(ctx context.Context, addr string, opts ...DialOption) (c net.Co
 		opt.apply(&op)
 	}
 
+	if op.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, op.timeout)
+		defer cancel()
+	}
+
 	// call before dial hooks
 	dialMetas := make(DialMetas)
 	ctx = context.WithValue(ctx, dialCtxKey, dialMetas)
@@ -64,6 +70,27 @@ func DialContext(ctx context.Context, addr string, opts ...DialOption) (c net.Co
 	if err != nil {
 		return nil, err
 	}
+
+	// Some proxy implementations and after hooks perform blocking I/O without
+	// consulting ctx. Close the raw socket to interrupt that I/O on cancellation.
+	// Stop and join the callback before returning so later context cancellation
+	// cannot close a successfully established stream.
+	rawConn := c
+	dialCtx := ctx
+	closed := make(chan struct{})
+	stop := context.AfterFunc(dialCtx, func() {
+		_ = rawConn.Close()
+		close(closed)
+	})
+	defer func() {
+		if !stop() {
+			<-closed
+		}
+		if ctxErr := dialCtx.Err(); ctxErr != nil {
+			_ = rawConn.Close()
+			c, err = nil, ctxErr
+		}
+	}()
 
 	// call after dial hooks
 	sort.SliceStable(op.afterHooks, func(i, j int) bool {
